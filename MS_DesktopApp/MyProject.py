@@ -18,7 +18,7 @@ from api_sheets import record, delete_last_row, record_minus_operation
 
 
 # Загрузка базы данных
-con = sqlite3.connect('DataBase/Metals_with_data.db')
+con = sqlite3.connect('../MS_Telebot/db/Metals_with_data.db')
 cur = con.cursor()
 
 # Загрузка типов металлов с exel
@@ -147,23 +147,25 @@ class AddWeightMetalWindow(QWidget):
     def add_data(self):
         # Проверка на то, выполнена ли функция solve
         if self.flag_check_solve and self.lineEdit_quantity.text():
-            date_now = str(datetime.date.today()).replace('-', '.')
-            time_now = time.strftime("%H:%M", time.localtime())
+            date_now = datetime.date.today()
+            time_now = time.strftime("%H:%M:%S", time.localtime())
             quantity = float(self.lineEdit_quantity.text().replace(',', '.'))
             price = float(self.lineEdit_price.text())
             amount = float(self.lineEdit_sum.text())
             comment = self.plainText_comment.toPlainText()
-
-            # Собираем данные которые будем заносить в базу данных
-            values = (date_now, time_now, self.metal, quantity, price, amount, comment)
-            # Заносим в общую базу данных на сервере
-            record(values)
-            # Заносим в базу данных на пк
+            if '-' in str(quantity):
+                cur.execute(f"INSERT INTO minus_operations(metal, quantity, price, sum, date,"
+                            f" task, wher) "
+                            f"VALUES(?, ?, ?, ?, ?, ?, ?);", [self.metal, abs(quantity), abs(price), abs(amount),
+                                                              date_now, '', comment])
+                record_minus_operation([self.metal, abs(quantity), abs(price), abs(amount),
+                                        str(date_now), '', comment])
+            else:
+                record([str(date_now), str(time_now), self.metal, quantity, price, amount, comment])
             cur.execute(f"INSERT INTO all_operations(date, time, metal, quantity,"
                         f" price, sum, comment) "
-                        f"VALUES(?, ?, ?, ?, ?, ?, ?);", values)
-            # Сбрасываем id Автоинкремент
-            cur.execute("UPDATE SQLITE_SEQUENCE SET seq = 0 WHERE name = 'all_operations'")
+                        f"VALUES(?, ?, ?, ?, ?, ?, ?);", (date_now, time_now, self.metal, quantity,
+                                                          price, amount, comment))
             con.commit()
             # Сбрасываем таблицы с данные после занесения
             self.lineEdit_quantity.setText('')
@@ -328,15 +330,14 @@ class SummaryStatistics(QWidget):
 
     def load_table(self, text):
         metals_with_weights = []
-        self.date = str(datetime.date.today()).replace('-', '.')
+        self.date = str(datetime.date.today())
         metal_date_filter = '' if text == 'За всё время' else f'AND date = "{self.date}"'
         # Собираем данные по определённому запросу
         for metal in metals_list:
-            weight = round(sum(map(lambda x: x[0], cur.execute(f"""SELECT quantity
+            weight = sum(map(lambda x: x[0], cur.execute(f"""SELECT quantity
                                                                 FROM all_operations
                                                                 WHERE metal = '{metal[0]}'
-                                                                {metal_date_filter}
-                                                                """).fetchall())), 4)
+                                                                {metal_date_filter}""").fetchall()))
             metals_with_weights.append((metal[0], weight))
         # Загрузка таблицы
         self.tableWidget.setColumnCount(2)
@@ -361,8 +362,6 @@ class SummaryStatistics(QWidget):
         if check == QMessageBox.Yes and self.tableWidget.selectedItems():
             time_now = time.strftime("%H:%M", time.localtime())
             rows = len(list(set([i.row() for i in self.tableWidget.selectedItems()])))
-            # Сбрасываем id Автоинкремент
-            cur.execute("UPDATE SQLITE_SEQUENCE SET seq = 0 WHERE name = 'buttons_completed_op'")
             # Если человек выделил больше одного столбца то функия не сработает
             if rows > 1:
                 return
@@ -389,7 +388,7 @@ class SummaryStatistics(QWidget):
                     color = '(152, 251, 152)'
                 else:
                     color = '(255, 215, 0)'
-                values = (self.date, time_now, metal, weight_from_sys, weight_true, color)
+                values = (datetime.date.today(), time_now, metal, weight_from_sys, weight_true, color)
                 # Добавляем в базу данные для кнопок в окне Завершённые операции
                 cur.execute(f"INSERT INTO buttons_completed_op(date, time, metal, weight_from_sys,"
                             f" weight_true, color) VALUES(?, ?, ?, ?, ?, ?);", values)
@@ -397,7 +396,7 @@ class SummaryStatistics(QWidget):
                 # Переносим данные из Все операции в Архив операций
                 cur.execute(f"""INSERT INTO completed_operations
                                                 SELECT date, time, metal, quantity, price,
-                                                sum, comment FROM all_operations
+                                                sum, comment, id FROM all_operations
                                                 WHERE metal = '{metal}';""")
                 cur.execute(f"DELETE FROM all_operations WHERE metal = '{metal}'")
                 con.commit()

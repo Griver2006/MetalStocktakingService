@@ -12,15 +12,14 @@ credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 
 
-SAMPLE_SPREADSHEET_ID = '1t5OI3AaEjUF7wdeQewDym1Xdmn1n6n37CfqXOAu548k'
-# SAMPLE_SPREADSHEET_ID = '1mMEiSzF1OvsFcX8mt8skvHN2TmdvQHPOmICndSWPXJY'
+# SAMPLE_SPREADSHEET_ID = '1t5OI3AaEjUF7wdeQewDym1Xdmn1n6n37CfqXOAu548k'
+SAMPLE_SPREADSHEET_ID = '1oXfqdStLPb7fWZzfVdVr2YU5UdaBfLN171B2d3mrH7k'
 ACTUAL_PRICE = 'Актуальный прайс'
 KUSH_PRICE = 'Куш прайс'
 ALL_OPERATIONS = 'Все операции'
 MINUS_OPERATIONS = 'Минусовые операции'
 REPORT_DATA = 'Сводная страница'
 sheet_id = '1175068379'
-# sheet_id = '1175068379'
 
 service = build('sheets', 'v4', credentials=credentials).spreadsheets()
 
@@ -37,8 +36,6 @@ def call_metals_prices(kush=False):
 
 
 def delete_last_row():
-    # last_row = service.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
-    #                                 range=f"'{ALL_OPERATIONS}'!A2:G2").execute().get('values')
     request_body = {
         'requests': [
             {
@@ -82,7 +79,8 @@ def record(values):
                                 range=range_,
                                 valueInputOption='USER_ENTERED',
                                 body=array).execute()
-    except:
+    except Exception as e:
+        print(e)
         record(values)
 
 
@@ -96,15 +94,15 @@ def record_minus_operation(values):
         record_minus_operation(values)
 
 
-def get_report(date):
+def get_report(request):
     try:
-        if 'all_time' in date:
+        if 'all_time' in request:
             result = service.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
                                           range=f"'{REPORT_DATA}'!A2:B20").execute().get('values')
             return result
-        if 'today' in date:
+        if 'today' in request:
             result = service.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
                                           range=f"'{REPORT_DATA}'!D2:E19").execute().get('values')
             return result
     except:
-        get_report(date)
+        get_report(request)

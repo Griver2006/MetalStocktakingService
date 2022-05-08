@@ -7,13 +7,17 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from api_sheets import call_metals_prices
 from api_sheets import record, delete_last_row, record_minus_operation, get_report
 
+import os
 import datetime
 from data import db_session
 from data.users import User
 from data.all_operations import AllOperations
 from data.minus_operations import MinusOperations
+from data.clean_weights import ButtonsCleanWeights
 
 from config import TOKEN
+
+db_session.global_init("db/Metals_with_data.db")
 
 
 metal_types = dict(call_metals_prices())
@@ -22,7 +26,9 @@ menu_buttons = ['Записать веса', 'Куш', 'Отчёты', 'Чист
 information_buttons = ['Сводка весов за всё время', 'Сводка весов за сегодня',
                        'Цены металлов', 'Куш цены металлов']
 kush_buttons = ['Начать запись куша', 'Указать процент для куша']
-temp_scales = {}
+clean_weights_buttons = [name[0] for name in db_session.create_session().query(
+    ButtonsCleanWeights.name_clean_weight).all()]
+temp_weights = {}
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -30,6 +36,7 @@ reply_kb_menu = ReplyKeyboardMarkup(resize_keyboard=True)
 reply_kb_metals = ReplyKeyboardMarkup(resize_keyboard=True)
 reply_kb_information = ReplyKeyboardMarkup(resize_keyboard=True)
 reply_kb_kush = ReplyKeyboardMarkup(resize_keyboard=True)
+reply_kb_clean_weights = ReplyKeyboardMarkup(resize_keyboard=True)
 inline_kb_markup = InlineKeyboardMarkup()
 
 
@@ -46,6 +53,12 @@ class Report(StatesGroup):
     waiting_for_report_request = State()
 
 
+class CleanWeights(StatesGroup):
+    waiting_for_request = State()
+    waiting_for_new_clean_weights = State()
+    waiting_for_remove_clean_weight = State()
+
+
 def load_buttons(keyboard, ls_buttons, btn_back=True):
     new_row = True
     for btn in ls_buttons:
@@ -60,10 +73,16 @@ def load_buttons(keyboard, ls_buttons, btn_back=True):
 
 
 load_buttons(reply_kb_menu, menu_buttons, btn_back=False)
+
 reply_kb_metals.add(types.KeyboardButton('Сбросить общую сумма'))
 load_buttons(reply_kb_metals, [*list(metal_types.keys()), 'Удалить последную запись'])
+
 load_buttons(reply_kb_kush, kush_buttons)
 load_buttons(reply_kb_information, information_buttons)
+
+reply_kb_clean_weights.add(types.KeyboardButton('Добавить новый чистый вес'))
+reply_kb_clean_weights.add(types.KeyboardButton('Удалить вес'))
+load_buttons(reply_kb_clean_weights, [*clean_weights_buttons])
 
 
 def is_float_int(digits):
@@ -98,7 +117,7 @@ async def reset_total_amount(message: types.Message):
 
 
 async def do_plus_operation(message: types.Message):
-    global temp_scales
+    global temp_weights
     # Загружаем значения в базу данных
     try:
         dbs = db_session.create_session()
@@ -131,7 +150,7 @@ async def do_plus_operation(message: types.Message):
                   all_operations.quantity, all_operations.price, all_operations.sum, all_operations.comment]
         dbs.commit()
         if user.kush_recording:
-            temp_scales[message.from_user.id].append(values)
+            temp_weights[message.from_user.id].append(values)
             return
         record(values)
     except Exception as e:
@@ -141,7 +160,7 @@ async def do_plus_operation(message: types.Message):
 
 
 async def do_minus_operation(message):
-    global temp_scales
+    global temp_weights
     # Загружаем значения в базу данных
     try:
         dbs = db_session.create_session()
@@ -192,10 +211,8 @@ async def do_minus_operation(message):
                                                 f'{minus_operations.quantity},'
                                                 f' Цена: {minus_operations.price}, Сумма: {round(minus_operations.sum)}',
                                reply_markup=inline_kb_markup)
-        await bot.send_message(message.chat.id, 'Весс записан',
-                               reply_markup=reply_kb_metals)
         dbs.commit()
-        record_minus_operation([user.metal, minus_operations.quantity, minus_operations.price, minus_operations.sum,
+        record_minus_operation([minus_operations.metal, minus_operations.quantity, minus_operations.price, minus_operations.sum,
                                 str(message.date).split()[0].replace('-', '.'), minus_operations.task,
                                 minus_operations.where])
     except Exception as e:
@@ -214,7 +231,7 @@ async def do_kush(message: types.Message, state: FSMContext):
         await state.finish()
         return
     elif message.text == 'Начать запись куша':
-        temp_scales[message.from_user.id] = []
+        temp_weights[message.from_user.id] = []
         current_user.kush_recording = True
         # reply_kb_metals.keyboard.clear()
         reply_kb_metals.keyboard.insert(0, ['Веса вписаны'])
@@ -261,7 +278,7 @@ async def do_record(message: types.Message, state: FSMContext):
         return
     if message.text == 'Вернуться в меню куша':
         reply_kb_metals.keyboard.pop(0)
-        temp_scales[message.from_user.id] = []
+        temp_weights[message.from_user.id] = []
         current_user.kush_recording = False
         current_user.client_amount = 0
         reply_kb_metals.keyboard[-1] = ['Вернуться в меню']
@@ -279,41 +296,41 @@ async def do_record(message: types.Message, state: FSMContext):
     elif message.text == 'Сбросить общую сумма':
         await reset_total_amount(message)
     elif message.text in 'Веса вписаны':
-        if not temp_scales[message.from_user.id]:
+        if not temp_weights[message.from_user.id]:
             await bot.send_message(message.chat.id, 'Вы не вписали не один вес',
                                    reply_markup=reply_kb_metals)
             return
         # Общая сумма сум по основным ценам 'Актуальный прайс'
-        total_amount_tmp_s = round(sum(scale[5] for scale in temp_scales[message.from_user.id]))
+        total_amount_tmp_s = round(sum(operation[5] for operation in temp_weights[message.from_user.id]))
         # Сумма рабочего который разобрал куш клиента
         worker_amount = round(total_amount_tmp_s / 100 * current_user.kush_percent)
         # Изменяем записи на новые цены, а также изменяем сумму под новую цену
-        for scale in temp_scales[message.from_user.id]:
-            scale[4] = float(kush_prices[scale[2]].replace(',', '.'))  # Изменяем цену
-            scale[5] = scale[3] * scale[4]  # Изменяем сумму
+        for operation in temp_weights[message.from_user.id]:
+            operation[4] = float(kush_prices[operation[2]].replace(',', '.'))  # Изменяем цену
+            operation[5] = operation[3] * operation[4]  # Изменяем сумму
         # Сумма работадателя которую нужно отнять от суммы клиента
-        employer_amount = sum(scale[3] * float(kush_prices['Черный'].replace(',', '.'))
-                              for scale in temp_scales[message.from_user.id])
+        employer_amount = sum(operation[3] * float(kush_prices['Черный'].replace(',', '.'))
+                              for operation in temp_weights[message.from_user.id])
         # Сумма клиента чей куш был разобран
-        client_amount = round(sum(scale[5] for scale in temp_scales[message.from_user.id])
+        client_amount = round(sum(operation[5] for operation in temp_weights[message.from_user.id])
                               - employer_amount - worker_amount)
         information = f'\n{"---" * 10}\n'.join([f'Сумма рабочего: {worker_amount}', f'Ваша Сумма: {client_amount}'])
         await bot.send_message(message.chat.id, information,
                                reply_markup=reply_kb_kush)
-        for scale in temp_scales[message.from_user.id]:
-            scale[4] = float(kush_prices[scale[2]].replace(',', '.'))  # Изменяем цену
-            scale[5] = scale[3] * scale[4]  # Изменяем сумму
+        for operation in temp_weights[message.from_user.id]:
+            operation[4] = float(kush_prices[operation[2]].replace(',', '.'))  # Изменяем цену
+            operation[5] = operation[3] * operation[4]  # Изменяем сумму
             all_operations = AllOperations()
-            all_operations.date = datetime.datetime.strptime(scale[0], "%Y.%m.%d").date()
-            all_operations.time = datetime.datetime.strptime(scale[1], "%H:%M").time()
-            all_operations.metal = scale[2]
-            all_operations.quantity = scale[3]
-            all_operations.price = scale[4]
-            all_operations.sum = scale[5]
-            all_operations.comment = scale[6]
+            all_operations.date = datetime.datetime.strptime(operation[0], "%Y.%m.%d").date()
+            all_operations.time = datetime.datetime.strptime(operation[1], "%H:%M").time()
+            all_operations.metal = operation[2]
+            all_operations.quantity = operation[3]
+            all_operations.price = operation[4]
+            all_operations.sum = operation[5]
+            all_operations.comment = operation[6]
             dbs.add(all_operations)
-            record(scale)
-        temp_scales[message.from_user.id] = []
+            record(operation)
+        temp_weights[message.from_user.id] = []
         current_user.kush_recording = False
         current_user.client_amount = 0
         reply_kb_metals.keyboard.pop(0)
@@ -372,6 +389,101 @@ async def show_report(message: types.Message, state: FSMContext):
         return
 
 
+@dp.message_handler(state=CleanWeights.waiting_for_request)
+async def clean_weights(message: types.Message, state: FSMContext):
+    dbs = db_session.create_session()
+    if message.text == 'Вернуться в меню':
+        await bot.send_message(message.chat.id, 'Вы в меню',
+                               reply_markup=reply_kb_menu)
+        await state.finish()
+        return
+    if message.text == 'Добавить новый чистый вес':
+        await bot.send_message(message.chat.id, 'Добавьте фото предмета, его название и описание',
+                               reply_markup=reply_kb_clean_weights)
+        await CleanWeights.waiting_for_new_clean_weights.set()
+        return
+    if message.text == 'Удалить вес':
+        await bot.send_message(message.chat.id, 'Нажмите на копку с названием предмета',
+                               reply_markup=reply_kb_clean_weights)
+        await CleanWeights.waiting_for_remove_clean_weight.set()
+    if message.text in clean_weights_buttons:
+        clean_weight = dbs.query(ButtonsCleanWeights).filter(ButtonsCleanWeights.name_clean_weight
+                                                             == message.text).first()
+        await bot.send_photo(message.from_user.id, types.InputFile(clean_weight.path),
+                             caption=clean_weight.description_clean_w,
+                             reply_to_message_id=message.message_id)
+
+
+@dp.message_handler(content_types=['photo', 'text'], state=CleanWeights.waiting_for_new_clean_weights)
+async def add_new_clean_weight(message: types.Message, state: FSMContext):
+    dbs = db_session.create_session()
+    if message.md_text in 'Вернуться в меню':
+        await bot.send_message(message.chat.id, 'Вы в меню',
+                               reply_markup=reply_kb_menu)
+        await state.finish()
+        return
+    if not message.md_text or '-' not in message.md_text and message.md_text.count('-') == 1 or not message.photo:
+        await bot.send_message(message.chat.id, "Запрос отклонён, пожалуйста сделайте запрос"
+                                                " как показано в руководстве",
+                               reply_markup=reply_kb_clean_weights)
+        return
+    if message.md_text.split('-')[0][:-1].strip() in clean_weights_buttons:
+        await bot.send_message(message.chat.id, 'Предмет с таким названием, уже есть в базе.'
+                                                ' Пожалуйста придумайте другое название и повторите попытку',
+                               reply_markup=reply_kb_clean_weights)
+        return
+    new_clean_weight = ButtonsCleanWeights()
+    new_clean_weight.name_clean_weight = message.md_text.split('-')[0][:-1].strip()
+    new_clean_weight.description_clean_w = message.md_text.split('-')[1].strip()
+    last_row = dbs.query(ButtonsCleanWeights).order_by(ButtonsCleanWeights.id.desc()).first()
+    if last_row:
+        path = f'photos_of_clean_weights/{last_row.id + 1}.jpg'
+    else:
+        path = f'photos_of_clean_weights/1.jpg'
+    new_clean_weight.path = path
+    dbs.add(new_clean_weight)
+    clean_weights_buttons.append(new_clean_weight.name_clean_weight)
+    await message.photo[-1].download(path)
+    reply_kb_clean_weights.keyboard = reply_kb_clean_weights.keyboard[:-1]
+    if len(dbs.query(ButtonsCleanWeights).all()) % 2 != 0:
+        reply_kb_clean_weights.add(types.KeyboardButton(new_clean_weight.name_clean_weight))
+    else:
+        reply_kb_clean_weights.insert(types.KeyboardButton(new_clean_weight.name_clean_weight))
+    reply_kb_clean_weights.add(types.KeyboardButton('Вернуться в меню'))
+    await bot.send_message(message.chat.id, 'Новый чистый вес добавлен!',
+                           reply_markup=reply_kb_clean_weights)
+    dbs.commit()
+    await CleanWeights.waiting_for_request.set()
+
+
+@dp.message_handler(content_types=['photo', 'text'], state=CleanWeights.waiting_for_remove_clean_weight)
+async def remove_clean_weight(message: types.Message, state: FSMContext):
+    dbs = db_session.create_session()
+    if message.md_text in 'Вернуться в меню':
+        await bot.send_message(message.chat.id, 'Вы в меню',
+                               reply_markup=reply_kb_menu)
+        await state.finish()
+        return
+    elif message.text in clean_weights_buttons:
+        clean_weight = dbs.query(ButtonsCleanWeights).filter(ButtonsCleanWeights.name_clean_weight
+                                                             == message.text).first()
+        os.remove(clean_weight.path)
+        dbs.delete(clean_weight)
+        clean_weights_buttons.remove(clean_weight.name_clean_weight)
+
+        reply_kb_clean_weights.keyboard.clear()
+        reply_kb_clean_weights.add(types.KeyboardButton('Добавить новый чистый вес'))
+        reply_kb_clean_weights.add(types.KeyboardButton('Удалить вес'))
+        load_buttons(reply_kb_clean_weights, [*clean_weights_buttons])
+        await bot.send_message(message.chat.id, 'Чистый вес успешно удалён!',
+                               reply_markup=reply_kb_clean_weights)
+        dbs.commit()
+        await CleanWeights.waiting_for_request.set()
+    else:
+        await bot.send_message(message.chat.id, 'Такого предмета нету в базе данных!',
+                               reply_markup=reply_kb_clean_weights)
+
+
 @dp.message_handler(commands=['start'])
 async def begin(message: types.Message):
     dbs = db_session.create_session()
@@ -390,12 +502,13 @@ async def begin(message: types.Message):
         current_user.operation_ended = False
         current_user.kush_percent = 0
     dbs.commit()
+    print(type(message.chat.id))
     await bot.send_message(message.chat.id, 'Бот включён, приятного пользования!', reply_markup=reply_kb_menu)
 
 
-@dp.message_handler(content_types=['text'])
+@dp.message_handler(content_types=['text', 'photo'])
 async def set_text(message):
-    global temp_scales
+    global temp_weights
     if message.chat.type == 'private':
         if message.text == 'Записать веса':
             await bot.send_message(message.chat.id, 'Типы металлов загружены',
@@ -410,12 +523,22 @@ async def set_text(message):
             await bot.send_message(message.chat.id, 'Кнопки отчётов загружены',
                                    reply_markup=reply_kb_information)
             await Report.waiting_for_report_request.set()
+        if message.text == 'Чистые веса':
+            await bot.send_message(message.chat.id, 'Кнопки чистых весов загружены',
+                                   reply_markup=reply_kb_clean_weights)
+            await CleanWeights.waiting_for_request.set()
+        if message.text == '📚Руководство':
+            pass
+
+
+async def for_startup(empty):
+    for user_id in db_session.create_session().query(User.id).all():
+        await bot.send_message(user_id[0], 'Бот перезапущен', reply_markup=reply_kb_menu)
 
 
 if __name__ == '__main__':
     while True:
         try:
-            db_session.global_init("db/Metals_with_data.db")
-            executor.start_polling(dp, skip_updates=True)
+            executor.start_polling(dp, skip_updates=True, on_startup=for_startup)
         except Exception as e:
             print(e)

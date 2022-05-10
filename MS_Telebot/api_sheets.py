@@ -11,7 +11,6 @@ SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, 'credentials.json')
 credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 
-
 SAMPLE_SPREADSHEET_ID = '1oXfqdStLPb7fWZzfVdVr2YU5UdaBfLN171B2d3mrH7k'
 sheet_id = '1175068379'
 ACTUAL_PRICE = 'Актуальный прайс'

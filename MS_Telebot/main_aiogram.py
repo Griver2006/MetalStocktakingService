@@ -38,7 +38,6 @@ information_buttons = ['Сводка весов за всё время', 'Сво
 kush_buttons = ['Начать запись куша', 'Указать процент для куша']
 clean_weights_buttons = [name[0] for name in db_session.create_session().query(
     ButtonsCleanWeights.name_clean_weight).all()]
-print()
 
 # Этот словарь нужен для do_kush, он сохраняет веса которые нужно перепистаь по другим ценам
 temp_operations = {}

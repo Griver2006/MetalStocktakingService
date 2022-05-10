@@ -12,19 +12,18 @@ credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 
 
-# SAMPLE_SPREADSHEET_ID = '1t5OI3AaEjUF7wdeQewDym1Xdmn1n6n37CfqXOAu548k'
 SAMPLE_SPREADSHEET_ID = '1oXfqdStLPb7fWZzfVdVr2YU5UdaBfLN171B2d3mrH7k'
+sheet_id = '1175068379'
 ACTUAL_PRICE = 'Актуальный прайс'
 KUSH_PRICE = 'Куш прайс'
 ALL_OPERATIONS = 'Все операции'
 MINUS_OPERATIONS = 'Минусовые операции'
 REPORT_DATA = 'Сводная страница'
-sheet_id = '1175068379'
 
 service = build('sheets', 'v4', credentials=credentials).spreadsheets()
 
 
-# Call the Sheets API
+# Функия которая возвращяет цены металлов
 def call_metals_prices(kush=False):
     if kush:
         result = service.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
@@ -35,6 +34,7 @@ def call_metals_prices(kush=False):
     return result.get('values', [])[1:]
 
 
+# функция для удаления последней строки в google sheets
 def delete_last_row():
     request_body = {
         'requests': [
@@ -56,7 +56,8 @@ def delete_last_row():
         delete_last_row()
 
 
-def record(values):
+# Функия для записи плюсовой операции в google sheets
+def record_plus_operation(values):
     request_body = {
         'requests': [
             {
@@ -79,11 +80,11 @@ def record(values):
                                 range=range_,
                                 valueInputOption='USER_ENTERED',
                                 body=array).execute()
-    except Exception as e:
-        print(e)
-        record(values)
+    except Exception:
+        record_plus_operation(values)
 
 
+# Функия для записи минусовой операции в google sheets
 def record_minus_operation(values):
     try:
         service.values().append(spreadsheetId=SAMPLE_SPREADSHEET_ID,
@@ -94,6 +95,7 @@ def record_minus_operation(values):
         record_minus_operation(values)
 
 
+# Функия для получения нужной нам информации из google sheets
 def get_report(request):
     try:
         if 'all_time' in request:

@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QStackedWidget, 
 # Импорт модуля из другой папки (Здесь нет ошибки)
 sys.path.insert(1, '../MS_Telebot/')
 from api_sheets import call_metals_prices
-from api_sheets import record, delete_last_row, record_minus_operation
+from api_sheets import record_plus_operation, delete_last_row, record_minus_operation
 
 
 # Загрузка базы данных

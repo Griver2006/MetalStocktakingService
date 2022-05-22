@@ -362,6 +362,7 @@ async def do_record(message: types.Message, state: FSMContext):
         await bot.send_message(message.chat.id, 'Записывание куша прервано, веса сброшены',
                                reply_markup=reply_kb_kush)
         await state.finish()
+        dbs.commit()
         # Возвращаемся в состояния(Меню кнопки куш)
         await Kush.waiting_for_kush_request.set()
         return
@@ -440,6 +441,7 @@ async def do_record(message: types.Message, state: FSMContext):
             last_row = dbs.query(AllOperations).order_by(AllOperations.id.desc()).first()
             # Удаляем её из бд
             dbs.delete(last_row)
+        dbs.commit()
         await bot.send_message(message.chat.id, f'Последняя запись успешно удалена',
                                reply_markup=reply_kb_kush_recording if current_user.kush_recording
                                else reply_kb_metals)

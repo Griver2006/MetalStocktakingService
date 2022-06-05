@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/DLC MS_Telebot.iml" filepath="$PROJECT_DIR$/.idea/DLC MS_Telebot.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/MS_Telebot.iml" filepath="$PROJECT_DIR$/.idea/MS_Telebot.iml" />
     </modules>
   </component>
 </project>

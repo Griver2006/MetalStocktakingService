@@ -669,6 +669,7 @@ async def set_text(message):
     global temp_operations
     if message.chat.type == 'private':
         if message.text == 'Записать веса':
+            print(dir(message.bot))
             await bot.send_message(message.chat.id, 'Типы металлов загружены',
                                    reply_markup=reply_kb_metals)
             await Recording.waiting_for_data_record.set()
